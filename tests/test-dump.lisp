@@ -32,7 +32,7 @@
 (addtest (dump-tests)
   named-dump
   (ensure-same (with-output-to-string (stream)
-                 (dump-named stream 2 "x"))
-               "`x` <-
+                 (dump-named stream 'x 2))
+               "`X` <-
 2
 "))
