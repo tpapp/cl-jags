@@ -9,6 +9,12 @@
                #:alexandria
                #:metabang-bind
                #:anaphora
+               #:cl-num-utils
+               #:cl-random
+               #:cl-fad
+               #:cl-ppcre
+               #:random-sample
+               #:trivial-shell
                #:cl-num-utils)
   :components
   ((:module 
@@ -19,5 +25,10 @@
    (:module 
     "main"
     :pathname #P"src/"
+    :serial t
     :components
-    ((:file "dump")))))
+    ((:file "utilities")
+     (:file "dump")
+     (:file "model")
+     (:file "coda")
+     (:file "session")))))
