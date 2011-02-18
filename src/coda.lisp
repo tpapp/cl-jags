@@ -26,7 +26,7 @@
          (var (gethash name monitor-varnames)))
     (assert var () "Variable ~A was not monitored." name)
     (if indexes
-        (cons var indexes)
+        (cons var (mapcar #'1- indexes))
         var)))
 
 ;; (parse-node "MU" (monitor-varnames *session*))
