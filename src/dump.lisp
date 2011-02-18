@@ -65,3 +65,7 @@ the latter is not allowed in symbols that denote R/JAGS variables.."
     (princ "), .Dim=" stream)
     (dump stream dimensions)
     (princ ")" stream)))
+
+(defun 1-based (array)
+  "Convert an array of 0-based indexes to 1-based."
+  (map-array #'1+ array))
