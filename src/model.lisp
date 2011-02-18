@@ -2,6 +2,37 @@
 
 (in-package #:cl-jags)
 
+;;; expansion
+
+(defclass expansion-table ()
+  ((arrays :accessor arrays :initarg :arrays :initform nil)))
+
+(defparameter *expansion-table* (make-instance 'expansion-table)
+  "Default expansion table.")
+
+(defgeneric expand-cons (key form)
+  (:documentation "Expand FORM, dispatching on KEY.  If the form is not to be
+  expanded further, the second value returned is T.")
+  (:method (key form)
+    (aif (find key (arrays *expansion-table*))
+         (cons 'aref form)
+         (values form t))))
+
+(defun expand-1 (form)
+  (cond
+    ((consp form) (expand-cons (car form) form))
+    (t (values form t))))
+
+(defun expand (form)
+  (bind (((:values expansion final?) (expand-1 form)))
+    (if final?
+        (if (listp expansion)
+            (mapcar #'expand-1 expansion)
+            (expand-1 expansion))
+        (expand expansion))))
+
+;;; output to R/JAGS syntax
+
 (defparameter *indent* 0)
 
 (defun out (expression)
@@ -66,89 +97,108 @@ parsing by R/JAGS.  *INDENT* controls indentation."
      ,@body
      (princ #\))))
 
-(defmacro define-notation ((name &rest arguments) &key out)
-  ""
-  (with-unique-names (rest)
-    `(progn
-       (defmacro ,name ,arguments
-         (declare (ignorable ,@(destructured-variables arguments)))
-         (error "macro should never be called, purely as notation aid"))
-       (defmethod out-cons ((first (eql ',name)) ,rest)
-         (destructuring-bind ,arguments ,rest
-           ,out)))))
+(defmacro define-expansion (name (&rest arguments) &body body)
+  (with-unique-names (form)
+    `(defmethod expand-cons ((first (eql ',name)) ,form)
+       (destructuring-bind ,arguments (cdr ,form)
+         ,@body))))
 
-;;; simple notation
-
-(define-notation (each (index array &optional (dimension 1)) &body body)
-    ;; ?? from-to syntax?
-    :out (progn
-           (indent)
-           (princ "for (")
-           (out index)
-           (princ " in 1:")
-           (out `(ref (dim ,array) ,dimension))
-           (princ #\))
-           (with-braces
-             (mapc #'out body))))
-
-(define-notation (~ expression distribution)
-    :out (with-line
-           (out expression)
-           (princ " ~ ")
-           (out distribution)))
-
-(define-notation (@ expression value)
-    :out (with-line
-           (out expression)
-           (princ " <- ")
-           (out value)))
-
-(define-notation (ref array &rest indexes)
-    :out (progn
-           (out array)
-           (iter
-             (for index :in indexes)
-             (princ (if (first-iteration-p) #\[ #\,))
-             (out index))
-           (princ #\])))
-
-;;; various infix operations
-
-(defmacro define-infix ((name &rest arguments) out)
+(defmacro define-primitive (name (&rest arguments) &body body)
   (with-unique-names (rest)
     `(defmethod out-cons ((first (eql ',name)) ,rest)
        (destructuring-bind ,arguments ,rest
-         ,out))))
+         ,@body))))
 
-(define-infix (normal mean sd)
-    (out-funcall "dnorm" mean `(expt ,sd -2)))
+(defmacro define-primitive* (name (&rest arguments) &body body)
+  `(progn
+     (defun ,name ,arguments
+       (declare (ignorable ,@arguments))
+       (error "This function is provided as a syntactic aid and is not meant 
+               to be used as CL code."))
+     (define-primitive ,name ,arguments ,@body)))
 
-(define-infix (uniform left right)
-    (out-funcall "dunif" left right))
+(defmacro define-expansion* (name (&rest arguments) &body body)
+  `(progn
+     (defmacro ,name ,arguments
+       (declare (ignorable ,@(destructured-variables arguments)))
+       (error "This macro is provided as a syntactic aid and is not meant 
+               to be used as CL code."))
+     (define-expansion ,name ,arguments ,@body)))
 
-(define-infix (+ &rest arguments)
-    (iter
-      (for argument :in arguments)
-      (unless (first-iteration-p) (princ #\+))
-      (with-parens (out argument))))
+;;; some primitives
 
-(define-infix (length vector)
-    (out-funcall "length" vector))
+(define-primitive for% (index from to &body body)
+  (indent)
+  (princ "for (")
+  (out index)
+  (princ " in ")
+  (out from)
+  (princ ":")
+  (out to)
+  (princ #\))
+  (with-braces
+    (mapc #'out body)))
 
-(define-infix (dim array)
-    (out-funcall "dim" array))
+(define-primitive normal (mean sd)
+  (out-funcall "dnorm" mean `(expt ,sd -2)))
 
-(define-infix (expt base power)
-    (progn
-      (with-parens (out base))
-      (princ #\^)
-      (with-parens (out power))))
+(define-primitive uniform (left right)
+  (out-funcall "dunif" left right))
+
+(define-primitive + (&rest arguments)
+  (iter
+    (for argument :in arguments)
+    (unless (first-iteration-p) (princ #\+))
+    (with-parens (out argument))))
+
+(define-primitive length (vector)
+  (out-funcall "length" vector))
+
+(define-primitive expt (base power)
+  (with-parens (out base))
+  (princ #\^)
+  (with-parens (out power)))
+
+(define-primitive aref (array &rest indexes)
+  (out array)
+  (iter
+    (for index :in indexes)
+    (princ (if (first-iteration-p) #\[ #\,))
+    (out index))
+  (princ #\]))
+
+;;; these primitives will be provided as empty functions for syntactic
+;;; convenience
+
+(define-primitive* dim (array)
+  (out-funcall "dim" array))
+
+(define-primitive* ~ (expression distribution)
+    (with-line
+      (out expression)
+      (princ " ~ ")
+      (out distribution)))
+
+;;; expansions
+
+(define-expansion* each ((array index &optional (dimension 1)) &body body)
+  `(for% ,index 1 (aref (dim ,array) ,dimension) ,@body))
+
+(define-expansion* each~ ((array index) distribution
+                        &body body)
+  `(each (,array ,index)
+     (~ (aref ,array ,index) ,distribution)
+     ,@body))
+
+(define-expansion* for-index ((index to-or-from &optional (to nil to?)) &body body)
+  `(for% ,index ,(if to? to-or-from 1) ,(if to? to to-or-from) ,@body))
 
 ;;; model
 
 (defclass model ()
   ((definition :accessor definition :initarg :definition)
-   ))
+   (expansion-table :accessor expansion-table :initarg :expansion-table
+                    :initform (make-instance 'expansion-table))))
 
 (defmacro with-new-file ((stream filespec) &body body)
   `(with-open-file (,stream ,filespec :direction :output
@@ -158,7 +208,10 @@ parsing by R/JAGS.  *INDENT* controls indentation."
 
 (defun write-model (model filespec)
   "Write model to FILESPEC."
-  (with-new-file (*standard-output* filespec)
-    (princ "model ")
-    (with-braces
-      (mapc #'out (definition model)))))
+  (bind (((:slots-r/o definition expansion-table) model)
+         (*expansion-table* expansion-table)
+         (expanded (mapcar #'expand definition)))
+    (with-new-file (*standard-output* filespec)
+      (princ "model ")
+      (with-braces
+        (mapc #'out expanded)))))
