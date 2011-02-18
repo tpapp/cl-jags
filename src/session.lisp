@@ -9,7 +9,7 @@
   "Minimum BURN-IN when not given.")
 
 (defclass session ()
-  ((prefix :accessor prefix :initarg :prefix
+  ((prefix :accessor prefix
            :documentation "prependend to file names"
            :initform "")
    (dir :accessor dir :initarg :dir :documentation "working directory")
@@ -34,10 +34,10 @@
             :documentation "burn-in period, calculated from N-DRAWS if not given")
    (n-draws :accessor n-draws :initarg :n-draws :initform 1000
             :documentation "number of draws (to keep)")
-   (posterior-draws :accessor posterior-draws :initarg :posterior-draws
+   (posterior-draws :accessor posterior-draws
                     :documentation "Matrix with posterior draws, stacked by
                     chains.")
-   (node-table :accessor node-table :initarg :node-table
+   (node-table :accessor node-table
                :documentation "Node->index mapping for posterior draws.")))
 
 (defmethod initialize-instance :after ((session session) &key &allow-other-keys)
